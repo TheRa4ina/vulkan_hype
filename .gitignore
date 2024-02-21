@@ -1,4 +1,5 @@
 .vs
+/.vscode
 /logs
 /build
 vc140.pdb

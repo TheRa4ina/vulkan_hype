@@ -15,6 +15,8 @@
 static std::vector<char> readFile(const std::string& filename) {
     std::ifstream file(filename, std::ios::ate | std::ios::binary);
 
+    std::cout<<std::filesystem::current_path().string()<<std::endl;
+
     if (!file.is_open()) {
         throw std::runtime_error("failed to open file!");
     }
@@ -224,7 +226,7 @@ private:
                                                 .framebuffer    =   swapChainFramebuffers[imageIndex],
                                                 .clearValueCount=   1,
                                                 .pClearValues   =   &clearColor};
-        renderPassInfo.renderArea.offset = { 0, 0 };
+        renderPassInfo.renderArea.offset = vk::Offset2D( 0, 0 );
         renderPassInfo.renderArea.extent = swapChainExtent;
         commandBuffer.beginRenderPass(renderPassInfo,vk::SubpassContents::eInline);
         commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline);
@@ -735,7 +737,7 @@ private:
                                     .applicationVersion = vk::makeApiVersion(0,1,0,0),
                                     .pEngineName        = "No engine",
                                     .engineVersion      = vk::makeApiVersion(0,1,0,0),
-                                    .apiVersion         = vk::makeVersion(1,0,0) };
+                                    .apiVersion         = vk::makeVersion(1,1,0) };
 
         vk::InstanceCreateInfo createInfo{.pApplicationInfo   = &appInfo };
 

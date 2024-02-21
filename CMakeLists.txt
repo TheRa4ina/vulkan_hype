@@ -31,7 +31,7 @@ include(GoogleTest)
 add_subdirectory(shaders)
 
 #dependencies, probs wont need them
-add_subdirectory(libHello)
+add_subdirectory(libhello)
 
 #myownstuff
 add_subdirectory(src)

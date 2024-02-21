@@ -1,4 +1,4 @@
 {
-    "cmake.sourceDirectory": "/home/ra4ina/main_stuff/prog_stuff/projects/c++/openGL_fun/window_fun",
+    "cmake.sourceDirectory": "/home/ra4ina/main_stuff/prog_stuff/projects/c++/vulkan_ig",
     "cmake.configureSettings": { "gtest_build_samples": "ON" },
 }
