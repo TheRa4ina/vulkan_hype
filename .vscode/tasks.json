@@ -1,0 +1,15 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "type": "cmake",
+            "label": "CMake: configure",
+            "command": "configure",
+            "targets": [
+                "all"
+            ],
+            "problemMatcher": [],
+            "detail": "CMake template configure task"
+        },
+    ]
+}

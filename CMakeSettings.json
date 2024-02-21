@@ -1,0 +1,33 @@
+﻿{
+  "configurations": [
+    {
+      "buildCommandArgs": "",
+      "buildRoot": "${projectDir}\\build\\${name}",
+      "cmakeCommandArgs": "",
+      "cmakeExecutable": "F:/0main_stuff/prog_stuff/libraries/cpp/cmake-3.28.2/bin/cmake.exe",
+      "configurationType": "Debug",
+      "ctestCommandArgs": "",
+      "generator": "Ninja",
+      "inheritEnvironments": [ "msvc_x64_x64" ],
+      "installRoot": "${projectDir}\\out\\install\\${name}",
+      "name": "x64-Debug",
+      "variables": [
+        {
+          "name": "GLFW_BUILD_TESTS",
+          "value": "False",
+          "type": "BOOL"
+        },
+        {
+          "name": "VCPKG_TARGET_TRIPLET",
+          "value": "x64-windows",
+          "type": "STRING"
+        },
+        {
+          "name": "GLFW_BUILD_EXAMPLES",
+          "value": "False",
+          "type": "BOOL"
+        }
+      ]
+    }
+  ]
+}
