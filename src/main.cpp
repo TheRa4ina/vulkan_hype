@@ -79,7 +79,7 @@ const bool enableValidationLayers = false;
 #else
 const bool enableValidationLayers = true;
 #endif
-
+const int MAX_FRAMES_IN_FLIGHT = 2;
 class HelloTriangleApplication {
 public:
     void run() {
@@ -96,63 +96,79 @@ private:
     vk::Instance instance;
     vk::Device device;
     vk::PhysicalDevice physicalDevice = VK_NULL_HANDLE;
+
     vk::Queue graphicsQueue;
     vk::Queue presentQueue;
-
     VkDebugUtilsMessengerEXT debugMessenger;
     vk::SurfaceKHR surface;
+
     vk::SwapchainKHR swapChain;
     std::vector<vk::Image> swapChainImages;
     std::vector<vk::ImageView> swapChainImageViews;
     vk::Format swapChainImageFormat;
     vk::Extent2D swapChainExtent;
+
     vk::RenderPass renderPass;
     vk::PipelineLayout pipelineLayout;
-
     vk::Pipeline graphicsPipeline;
 
     std::vector<vk::Framebuffer> swapChainFramebuffers;
     vk::CommandPool commandPool;
-    vk::CommandBuffer commandBuffer;
+    std::vector<vk::CommandBuffer> commandBuffers;
 
-    vk::Semaphore imageAvailableSemaphore;
-    vk::Semaphore renderFinishedSemaphore;
-    vk::Fence inFlightFence;
+    std::vector<vk::Semaphore> imageAvailableSemaphores;
+    std::vector<vk::Semaphore> renderFinishedSemaphores;
+    std::vector<vk::Fence>  inFlightFences;
+    uint32_t currentFrame = 0;
+    bool framebufferResized = false;
+
     void initWindow() {
         glfwInit();
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-        glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
         window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
+        glfwSetWindowUserPointer(window, this);
+        glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
+    }
+
+    static void framebufferResizeCallback(GLFWwindow* window, int width, int height) {
+        auto app = reinterpret_cast<HelloTriangleApplication*>(glfwGetWindowUserPointer(window));
+        app->framebufferResized = true;
     }
 
     void drawFrame(){
-        device.waitForFences(inFlightFence, VK_TRUE, UINT64_MAX);
-        device.resetFences(inFlightFence);
+        device.waitForFences(inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
 
         uint32_t imageIndex;
-        auto nextImageAcquireResult= device.acquireNextImageKHR(swapChain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE);
-        if (nextImageAcquireResult.result == vk::Result::eSuccess) {
-            imageIndex = nextImageAcquireResult.value;
+        auto acquireResult= device.acquireNextImageKHR(
+            swapChain, UINT64_MAX, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE
+        );
+        if (acquireResult.result == vk::Result::eSuccess 
+            ||  acquireResult.result == vk::Result::eSuboptimalKHR) {
+            imageIndex = acquireResult.value;
         }
-        else {
+        else if (acquireResult.result == vk::Result::eErrorOutOfDateKHR) {
+            recreateSwapChain();
+            return;
+        }
+        else{
             throw std::runtime_error("failed to acquire next image");
         }
+        device.resetFences(inFlightFences[currentFrame]);
+        commandBuffers[currentFrame].reset();
+        recordCommandBuffer(commandBuffers[currentFrame], imageIndex);
 
-        commandBuffer.reset();
-        recordCommandBuffer(commandBuffer, imageIndex);
-
-        vk::Semaphore waitSemaphores[] = { imageAvailableSemaphore };
+        vk::Semaphore waitSemaphores[] = { imageAvailableSemaphores[currentFrame] };
         vk::PipelineStageFlags waitStages[] = { vk::PipelineStageFlagBits::eColorAttachmentOutput };
-        vk::Semaphore signalSemaphores[] = { renderFinishedSemaphore };
+        vk::Semaphore signalSemaphores[] = { renderFinishedSemaphores[currentFrame] };
 
         vk::SubmitInfo submitInfo{  .waitSemaphoreCount     =   1,
                                     .pWaitSemaphores        =   waitSemaphores,
                                     .pWaitDstStageMask      =   waitStages, 
                                     .commandBufferCount     =   1,
-                                    .pCommandBuffers        =   &commandBuffer,
+                                    .pCommandBuffers        =   &commandBuffers[currentFrame],
                                     .signalSemaphoreCount   =   1,
                                     .pSignalSemaphores      =   signalSemaphores };
-        graphicsQueue.submit(submitInfo, inFlightFence);    
+        graphicsQueue.submit(submitInfo, inFlightFences[currentFrame]);
         vk::SwapchainKHR swapChains[] = { swapChain };
         vk::PresentInfoKHR presentInfo{ .waitSemaphoreCount =   1,
                                         .pWaitSemaphores    =   signalSemaphores,
@@ -160,7 +176,13 @@ private:
                                         .pSwapchains        =   swapChains,
                                         .pImageIndices      =   &imageIndex,
                                         .pResults           =   nullptr };
-        presentQueue.presentKHR(presentInfo);
+        auto presentResult = presentQueue.presentKHR(presentInfo);
+        if ( (presentResult == vk::Result::eSuboptimalKHR) || framebufferResized) {
+            framebufferResized = false;
+            recreateSwapChain();
+        }
+        //currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+        currentFrame = (currentFrame + 1)& (MAX_FRAMES_IN_FLIGHT - 1);
     }
 
     void initVulkan() { 
@@ -178,21 +200,47 @@ private:
         createCommandBuffer();
         createSyncObjects();
     }
-    void cleanup() {
-        device.destroySemaphore(imageAvailableSemaphore);
-        device.destroySemaphore(renderFinishedSemaphore);
-        device.destroyFence(inFlightFence);
-        device.destroyCommandPool(commandPool);
-        for (auto framebuffer : swapChainFramebuffers) {
+
+    void cleanupSwapChain() {
+        for (auto& framebuffer : swapChainFramebuffers) {
             device.destroyFramebuffer(framebuffer);
         }
-        device.destroyPipeline(graphicsPipeline);
-        device.destroyPipelineLayout(pipelineLayout);
-        device.destroyRenderPass(renderPass);
-        for (auto imageViews : swapChainImageViews) {
+        for (auto& imageViews : swapChainImageViews) {
             device.destroyImageView(imageViews);
         }
         device.destroySwapchainKHR(swapChain);
+    }
+
+    void recreateSwapChain() {
+        int width = 0, height = 0;
+        glfwGetFramebufferSize(window, &width, &height);
+        while (width == 0 || height == 0) {
+            if (glfwWindowShouldClose(window))
+                return;
+            glfwGetFramebufferSize(window, &width, &height);
+            glfwWaitEvents();
+        }
+        device.waitIdle();
+
+        cleanupSwapChain();
+
+        createSwapChain();
+        createImageViews();
+        createFramebuffers();
+    }
+
+    void cleanup() {
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+        {
+            device.destroySemaphore(imageAvailableSemaphores[i]);
+            device.destroySemaphore(renderFinishedSemaphores[i]);
+            device.destroyFence(inFlightFences[i]);
+        }
+        cleanupSwapChain();
+        device.destroyCommandPool(commandPool);
+        device.destroyPipeline(graphicsPipeline);
+        device.destroyPipelineLayout(pipelineLayout);
+        device.destroyRenderPass(renderPass);
         device.destroy();
         if (enableValidationLayers) {
             DestroyDebugUtilsMessengerEXT(instance, debugMessenger, nullptr);
@@ -207,14 +255,21 @@ private:
 
 
     void createSyncObjects() {
+        imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+        renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+        inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
+
         vk::SemaphoreCreateInfo semaphoreInfo{};
 
         vk::FenceCreateInfo fenceInfo{ .flags = vk::FenceCreateFlagBits::eSignaled};
         
-        imageAvailableSemaphore = device.createSemaphore(semaphoreInfo);
-        renderFinishedSemaphore = device.createSemaphore(semaphoreInfo);
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+        {
 
-        inFlightFence = device.createFence(fenceInfo);
+            imageAvailableSemaphores[i] = device.createSemaphore(semaphoreInfo);
+            renderFinishedSemaphores[i] = device.createSemaphore(semaphoreInfo);
+            inFlightFences[i] = device.createFence(fenceInfo);
+        }
     }
 
     void recordCommandBuffer(vk::CommandBuffer commandBuffer, uint32_t imageIndex) {
@@ -248,11 +303,11 @@ private:
     }
 
     void createCommandBuffer() {
-        vk::CommandBufferAllocateInfo allocInfo{
-        .commandPool = commandPool,
-        .level = vk::CommandBufferLevel::ePrimary,
-        .commandBufferCount = 1 };
-        commandBuffer = device.allocateCommandBuffers(allocInfo)[0];
+        commandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+        vk::CommandBufferAllocateInfo allocInfo{.commandPool = commandPool,
+                                                .level = vk::CommandBufferLevel::ePrimary,
+                                                .commandBufferCount = (uint32_t)commandBuffers.size() };
+        commandBuffers = device.allocateCommandBuffers(allocInfo);
     }
 
     void createCommandPool() {
@@ -770,6 +825,7 @@ private:
             glfwPollEvents();
             drawFrame();
         }
+
 
         device.waitIdle();
     }

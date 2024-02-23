@@ -130,11 +130,9 @@ fucking hell i barely understand what's happening
 
 11:58 - triangle is finally done. I drawed it. HOLY SHIT.
 
-framesinflight
-
-and now i will try to create a diagram for everything that happenend right now. duh
-Unstoppable. super epic. 100% right i suppose.
-
 why do i even record time i have no idea. but why not sometimes ig. i could use like toogl or smth for this.
 ==aaaargh, doesnt matter. Since now i wont record time. that is final. im just gonna use timestamps max==
 
+# 20-th day
+
+honestly doesnt make sense.
