@@ -136,3 +136,61 @@ why do i even record time i have no idea. but why not sometimes ig. i could use 
 # 20-th day
 
 honestly doesnt make sense.
+
+# 21-th day
+
+24.02.23
+
+so present and graphics queues kinda know each other while creating logical device. because u give logical device their indexes.
+
+so graphics queue draws shit from command buffer
+and command buffer takes renderpass and graphic pipeline
+render pass for... render pass
+and graphics pipeline for... graphics pipeline
+
+render pass basically i have no idea
+
+but graphics pipeline makes the pipeline
+in meaning - vertex input, input assemly, viewport state rasterizer, multisampler(anitalisaing kinda), color blend and renderpass
+
+# 22-th day
+
+24.02.24
+
+
+# 23-th day
+
+24.02.25
+why do i even continue to do this idk.
+i'll stop intil something actually happens
+
+Also will stop writing this # headers and just gonna type in date 
+so yah
+
+Also now i know a bit about render pass
+it *suprisingly* containts attachments, dependecies, subpasses
+
+attachment description(attD) tell what to do, what to store, how to load and what final layout and such
+subpass is a command basically that just tells in what pipeline bind point what attachment reference use
+attachment reference(attR) tells at which idx is needed attachment description in an array of attachment description that we give to attR
+
+renderPass Info contains subpasses, attachment descriptions and dependencies
+
+so basically subpass tells idx of attachment description that we use because subpass contains attR.
+that means that we can change attD and still have same subpasses and such
+
+dependencies is tough stuff tho.
+I dont really get them rn. mostly stageMasks and accessMasks
+
+# 24-th day
+As far as i got it
+src and dst basically mean that:
+src - wait until everything that is before our staff that does *this* 
+dst - dont allow anything that uses that, to do before *this* is done
+both fore stage and access memory
+
+# 25-th day
+24.02.27
+
+
+what is mapping and unmapping means?

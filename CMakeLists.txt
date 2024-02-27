@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED On)
 set(CMAKE_CXX_EXTENSIONS Off)
 
 
-project(vulkan_hype VERSION 1.0.0) #name of your project
+project(vulkan_hype VERSION 1.0.1) #name of your project
 
 find_package(Vulkan REQUIRED)
 find_program(glslc_executable NAMES glslc HINTS Vulkan::glslc)

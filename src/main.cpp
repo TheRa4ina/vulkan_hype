@@ -1,6 +1,7 @@
 #define VULKAN_HPP_NO_CONSTRUCTORS
 #include <vulkan/vulkan.hpp>
 #include <GLFW/glfw3.h>
+#include <glm/glm.hpp>
 #include <iostream>
 #include <stdexcept>
 #include <cstdlib>
@@ -11,6 +12,7 @@
 #include <algorithm> // Necessary for std::clamp
 #include <fstream>
 #include <filesystem>
+#include <array>
 
 static std::vector<char> readFile(const std::string& filename) {
     std::ifstream file(filename, std::ios::ate | std::ios::binary);
@@ -66,6 +68,41 @@ void DestroyDebugUtilsMessengerEXT(
         func(instance, debugMessenger, pAllocator);
     }
 }
+
+struct Vertex {
+    glm::vec2 pos;
+    glm::vec3 color;
+
+    static vk::VertexInputBindingDescription getBindingDescription() {
+        vk::VertexInputBindingDescription bindingDescription{   .binding    = 0,
+                                                                .stride     = sizeof(Vertex),
+                                                                .inputRate  = vk::VertexInputRate::eVertex};
+        
+        return bindingDescription;
+    }
+
+    static std::array<vk::VertexInputAttributeDescription, 2> getAttributeDescriptions() {
+        std::array<vk::VertexInputAttributeDescription, 2> attributeDescriptions{};
+        attributeDescriptions[0].binding = 0;
+        attributeDescriptions[0].location = 0;
+        attributeDescriptions[0].format = vk::Format::eR32G32Sfloat;
+        attributeDescriptions[0].offset = offsetof(Vertex, pos);
+
+        attributeDescriptions[1].binding = 0;
+        attributeDescriptions[1].location = 1;
+        attributeDescriptions[1].format = vk::Format::eR32G32B32Sfloat;
+        attributeDescriptions[1].offset = offsetof(Vertex, color);
+
+        return attributeDescriptions;
+    }
+};
+
+const std::vector<Vertex> vertices = {
+    {{0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+    {{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
+    {{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
+};
+
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
 const std::vector<const char*> validationLayers = {
@@ -121,6 +158,9 @@ private:
     std::vector<vk::Fence>  inFlightFences;
     uint32_t currentFrame = 0;
     bool framebufferResized = false;
+
+    vk::Buffer vertexBuffer;
+    vk::DeviceMemory vertexBufferMemory;
 
     void initWindow() {
         glfwInit();
@@ -197,8 +237,43 @@ private:
         createGraphicsPipeline();
         createFramebuffers();
         createCommandPool();
+        createVertexBuffer();
         createCommandBuffer();
         createSyncObjects();
+    }
+
+    void createVertexBuffer() {
+        vk::BufferCreateInfo bufferInfo{.size = sizeof(vertices[0]) * vertices.size(),
+                                        .usage = vk::BufferUsageFlagBits::eVertexBuffer,   
+                                        .sharingMode =vk::SharingMode::eExclusive };
+        vertexBuffer = device.createBuffer(bufferInfo);
+
+        vk::MemoryRequirements memRequirements = device.getBufferMemoryRequirements(vertexBuffer);
+       
+
+        vk::MemoryAllocateInfo allocInfo{   .allocationSize = memRequirements.size,
+                                            .memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits,
+                                                vk::MemoryPropertyFlagBits::eHostVisible
+                                                | vk::MemoryPropertyFlagBits::eHostCoherent) };
+
+        vertexBufferMemory = device.allocateMemory(allocInfo);
+
+        device.bindBufferMemory(vertexBuffer, vertexBufferMemory,0);
+
+        void* data;
+        data = device.mapMemory(vertexBufferMemory, 0, bufferInfo.size);
+        memcpy(data, vertices.data(), (size_t)bufferInfo.size);
+        device.unmapMemory(vertexBufferMemory);
+    }
+
+    uint32_t findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) {
+        vk::PhysicalDeviceMemoryProperties memProperties = physicalDevice.getMemoryProperties(properties);
+        for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
+            if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties) {
+                return i;
+            }
+        }
+        throw std::runtime_error("failed to find suitable memory type!");
     }
 
     void cleanupSwapChain() {
@@ -230,13 +305,15 @@ private:
     }
 
     void cleanup() {
+        cleanupSwapChain();
+        device.destroyBuffer(vertexBuffer);
+        device.freeMemory(vertexBufferMemory);
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
         {
             device.destroySemaphore(imageAvailableSemaphores[i]);
             device.destroySemaphore(renderFinishedSemaphores[i]);
             device.destroyFence(inFlightFences[i]);
         }
-        cleanupSwapChain();
         device.destroyCommandPool(commandPool);
         device.destroyPipeline(graphicsPipeline);
         device.destroyPipelineLayout(pipelineLayout);
@@ -285,6 +362,10 @@ private:
         renderPassInfo.renderArea.extent = swapChainExtent;
         commandBuffer.beginRenderPass(renderPassInfo,vk::SubpassContents::eInline);
         commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline);
+        vk::Buffer vertexBuffers[] = { vertexBuffer };
+        vk::DeviceSize offsets[] = { 0 };
+
+        commandBuffer.bindVertexBuffers(0, vertexBuffers, offsets);
 
         vk::Viewport viewport{  .x          =   0.0f,
                                 .y          =   0.0f,
@@ -297,7 +378,7 @@ private:
         vk::Rect2D scissor{ .offset =   { 0, 0 },
                             .extent =   swapChainExtent };
         commandBuffer.setScissor(0, scissor);
-        commandBuffer.draw(3, 1, 0, 0);
+        commandBuffer.draw(static_cast<uint32_t>(vertices.size()), 1, 0, 0);
         commandBuffer.endRenderPass();
         commandBuffer.end();
     }
@@ -384,10 +465,14 @@ private:
                                                                 .pName  = "main" };
 
         vk::PipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageInfo, fragShaderStageInfo };
-        vk::PipelineVertexInputStateCreateInfo vertexInputInfo{ .vertexBindingDescriptionCount  =   0,
-                                                               .pVertexBindingDescriptions      =   nullptr, // Optional
-                                                               .vertexAttributeDescriptionCount =   0,
-                                                               .pVertexAttributeDescriptions    =   nullptr, // Optional
+
+        auto bindingDescription = Vertex::getBindingDescription();
+        auto attributeDescriptions = Vertex::getAttributeDescriptions();
+
+        vk::PipelineVertexInputStateCreateInfo vertexInputInfo{.vertexBindingDescriptionCount   =   1,
+                                                               .pVertexBindingDescriptions      =   &bindingDescription, // Optional
+                                                               .vertexAttributeDescriptionCount =   static_cast<uint32_t>(attributeDescriptions.size()),
+                                                               .pVertexAttributeDescriptions    =   attributeDescriptions.data(), // Optional
         };
 
         vk::PipelineInputAssemblyStateCreateInfo inputAssembly{ .topology               =   vk::PrimitiveTopology::eTriangleList,
@@ -428,12 +513,12 @@ private:
                                                                 .alphaToOneEnable       =   VK_FALSE };   // Optional
         
         vk::PipelineColorBlendAttachmentState colorBlendAttachment{ .blendEnable            = VK_FALSE,
-                                                                    .srcColorBlendFactor    = vk::BlendFactor::eOne,   // Optional
-                                                                    .dstColorBlendFactor    = vk::BlendFactor::eZero,  // Optional
-                                                                    .colorBlendOp           = vk::BlendOp::eAdd,              // Optional
-                                                                    .srcAlphaBlendFactor    = vk::BlendFactor::eOne,   // Optional
-                                                                    .dstAlphaBlendFactor    = vk::BlendFactor::eZero,  // Optional
-                                                                    .alphaBlendOp           = vk::BlendOp::eAdd,              // Optional
+                                                                    .srcColorBlendFactor    = vk::BlendFactor::eOne,    // Optional
+                                                                    .dstColorBlendFactor    = vk::BlendFactor::eZero,   // Optional
+                                                                    .colorBlendOp           = vk::BlendOp::eAdd,        // Optional
+                                                                    .srcAlphaBlendFactor    = vk::BlendFactor::eOne,    // Optional
+                                                                    .dstAlphaBlendFactor    = vk::BlendFactor::eZero,   // Optional
+                                                                    .alphaBlendOp           = vk::BlendOp::eAdd,        // Optional
                                                                     .colorWriteMask         = vk::ColorComponentFlagBits::eR |
             vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA };
 
@@ -608,7 +693,7 @@ private:
         }
         surface = psurface;
     }
-
+            
     void pickPhysicalDevice() {
         auto devices = instance.enumeratePhysicalDevices();
         if (devices.size() == 0) {
@@ -627,9 +712,9 @@ private:
     }
 
     void createLogicalDevice() {
-        QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
+        QueueFamilyIndices indicies = findQueueFamilies(physicalDevice);
         float queue_priority = 1.f;
-        std::set<uint32_t> uniqueQueueFamilies = { indices.graphicsFamily.value(), indices.presentFamily.value() };
+        std::set<uint32_t> uniqueQueueFamilies = { indicies.graphicsFamily.value(), indicies.presentFamily.value() };
         std::vector<vk::DeviceQueueCreateInfo> queueCreateInfos;
         for (uint32_t queueFamily : uniqueQueueFamilies) {
             vk::DeviceQueueCreateInfo queueCreateInfo{  .queueFamilyIndex   =   queueFamily,
@@ -655,8 +740,8 @@ private:
             createInfo.enabledLayerCount = 0;
         }
         device = physicalDevice.createDevice(createInfo);
-        graphicsQueue = device.getQueue(indices.graphicsFamily.value(),0);
-        presentQueue = device.getQueue(indices.presentFamily.value(), 0);
+        graphicsQueue = device.getQueue(indicies.graphicsFamily.value(),0);
+        presentQueue = device.getQueue(indicies.presentFamily.value(), 0);
 
     }
 
@@ -674,7 +759,7 @@ private:
                 indices.presentFamily = i;
             }
             if (indices.isComplete()) {
-                break;
+                break;  
             }
             i++;
         }
