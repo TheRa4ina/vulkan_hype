@@ -245,32 +245,36 @@ private:
         createFramebuffers();
         createCommandPool();
         createVertexBuffer();
+        createIndexBuffer();
         createCommandBuffer();
         createSyncObjects();
     }
 
-    void createBuffer(vk::DeviceSize size, 
-     vk::BufferUsageFlags usage, 
-     vk::MemoryPropertyFlags properties,
-     vk::Buffer& buffer,
-     vk::DeviceMemory& bufferMemory)
-     {
-        vk::BufferCreateInfo bufferInfo{.size = size,
-                                        .usage = usage,   
-                                        .sharingMode =vk::SharingMode::eExclusive };
-        buffer = device.createBuffer(bufferInfo);
+    void createIndexBuffer(){
+        vk::DeviceSize bufferSize= sizeof(indices[0]) * indices.size();
 
-        vk::MemoryRequirements memRequirements = device.getBufferMemoryRequirements(buffer);
-       
+        vk::Buffer stagingBuffer;
+        vk::DeviceMemory stagingBufferMemory;
 
-        vk::MemoryAllocateInfo allocInfo{   .allocationSize = memRequirements.size,
-                                            .memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits,properties)};
 
-        bufferMemory = device.allocateMemory(allocInfo);
 
-        device.bindBufferMemory(buffer, bufferMemory,0);
+        createBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferSrc,
+        vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+        stagingBuffer, stagingBufferMemory);
+
+
+        void* data;
+        data = device.mapMemory(stagingBufferMemory, 0, bufferSize);
+        memcpy(data, indices.data(),(size_t)bufferSize);
+        device.unmapMemory(stagingBufferMemory);
+
+        createBuffer(bufferSize,vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eIndexBuffer,
+        vk::MemoryPropertyFlagBits::eDeviceLocal,indexBuffer,indexBufferMemory);
+
+        copyBuffer(stagingBuffer,indexBuffer,bufferSize);
+        device.destroyBuffer(stagingBuffer);
+        device.freeMemory(stagingBufferMemory);
     }
-
 
 
     void createVertexBuffer() {
@@ -299,6 +303,30 @@ private:
         device.freeMemory(stagingBufferMemory);
 
     }
+
+    void createBuffer(vk::DeviceSize size, 
+     vk::BufferUsageFlags usage, 
+     vk::MemoryPropertyFlags properties,
+     vk::Buffer& buffer,
+     vk::DeviceMemory& bufferMemory)
+     {
+        vk::BufferCreateInfo bufferInfo{.size = size,
+                                        .usage = usage,   
+                                        .sharingMode =vk::SharingMode::eExclusive };
+        buffer = device.createBuffer(bufferInfo);
+
+        vk::MemoryRequirements memRequirements = device.getBufferMemoryRequirements(buffer);
+       
+
+        vk::MemoryAllocateInfo allocInfo{   .allocationSize = memRequirements.size,
+                                            .memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits,properties)};
+
+        bufferMemory = device.allocateMemory(allocInfo);
+
+        device.bindBufferMemory(buffer, bufferMemory,0);
+    }
+
+
 
     void copyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size) {
         vk::CommandBufferAllocateInfo allocInfo{.commandPool = commandPool,
@@ -364,6 +392,9 @@ private:
         cleanupSwapChain();
         device.destroyBuffer(vertexBuffer);
         device.freeMemory(vertexBufferMemory);
+
+        device.destroyBuffer(indexBuffer);
+        device.freeMemory(indexBufferMemory);
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
         {
             device.destroySemaphore(imageAvailableSemaphores[i]);
@@ -422,6 +453,7 @@ private:
         vk::DeviceSize offsets[] = { 0 };
 
         commandBuffer.bindVertexBuffers(0, vertexBuffers, offsets);
+        commandBuffer.bindIndexBuffer(indexBuffer,0,vk::IndexType::eUint16);
 
         vk::Viewport viewport{  .x          =   0.0f,
                                 .y          =   0.0f,
@@ -434,7 +466,8 @@ private:
         vk::Rect2D scissor{ .offset =   { 0, 0 },
                             .extent =   swapChainExtent };
         commandBuffer.setScissor(0, scissor);
-        commandBuffer.draw(static_cast<uint32_t>(vertices.size()), 1, 0, 0);
+        
+        commandBuffer.drawIndexed(static_cast<uint32_t>(indices.size()),1,0,0,0);
         commandBuffer.endRenderPass();
         commandBuffer.end();
     }
@@ -725,7 +758,7 @@ private:
     vk::SurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& availableFormats) {
 
         for (const auto& availableFormat : availableFormats) {
-            if (availableFormat.format == vk::Format::eB8G8R8A8Srgb && availableFormat.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear) {
+            if (availableFormat.format == vk::Format::eB8G8R8A8Unorm && availableFormat.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear) {
                 return availableFormat;
             }
         }
