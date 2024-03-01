@@ -1,7 +1,8 @@
 # shaders
 set(shaders_full_path ${CMAKE_CURRENT_LIST_DIR})
 set(shaders_path "shaders")
-# file(GLOB shaders RELATIVE ${shaders_full_path} *.vert *.frag)
+
+
 set(shaders 
 "shader.frag"
 "shader.vert"

@@ -34,4 +34,5 @@ even the simpliest bullshit and put a date next to it
 just like this:  
 
 - [x] writtent this bullshit, at 24.02.02 23:00
+- [x] drawed a rectangle by tutorial at 24.02.29
 

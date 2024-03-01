@@ -1,7 +1,12 @@
 #define VULKAN_HPP_NO_CONSTRUCTORS
 #include <vulkan/vulkan.hpp>
 #include <GLFW/glfw3.h>
+#define GLM_FORCE_RADIANS
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE 
+#define GLM_FORCE_LEFT_HANDED
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <chrono>
 #include <iostream>
 #include <stdexcept>
 #include <cstdlib>
@@ -97,6 +102,7 @@ struct Vertex {
         return attributeDescriptions;
     }
 };
+
 const std::vector<Vertex> vertices = {
     {{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
     {{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
@@ -107,15 +113,22 @@ const std::vector<uint16_t> indices = {
     0, 1, 2, 2, 3, 0
 };
 
+struct UniformBufferObject {
+    glm::mat4 model;
+    glm::mat4 view;
+    glm::mat4 proj;
+};
 
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
 const std::vector<const char*> validationLayers = {
-"VK_LAYER_KHRONOS_validation"
+"VK_LAYER_KHRONOS_validation","VK_LAYER_LUNARG_monitor"
 };
 const std::vector<const char*> deviceExtensions = {
-    VK_KHR_SWAPCHAIN_EXTENSION_NAME
+    VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+    VK_KHR_MAINTENANCE1_EXTENSION_NAME
 };
+
 #ifdef NDEBUG
 const bool enableValidationLayers = false;
 #else
@@ -151,6 +164,7 @@ private:
     vk::Extent2D swapChainExtent;
 
     vk::RenderPass renderPass;
+    vk::DescriptorSetLayout descriptorSetLayout;
     vk::PipelineLayout pipelineLayout;
     vk::Pipeline graphicsPipeline;
 
@@ -168,6 +182,10 @@ private:
     vk::DeviceMemory vertexBufferMemory;
     vk::Buffer indexBuffer;
     vk::DeviceMemory indexBufferMemory;
+
+    std::vector<vk::Buffer> uniformBuffers;
+    std::vector<vk::DeviceMemory> uniformBuffersMemory;
+    std::vector<void*> uniformBuffersMapped;
 
     void initWindow() {
         glfwInit();
@@ -207,7 +225,7 @@ private:
         vk::Semaphore waitSemaphores[] = { imageAvailableSemaphores[currentFrame] };
         vk::PipelineStageFlags waitStages[] = { vk::PipelineStageFlagBits::eColorAttachmentOutput };
         vk::Semaphore signalSemaphores[] = { renderFinishedSemaphores[currentFrame] };
-
+        updateUniformBuffer(currentFrame);
         vk::SubmitInfo submitInfo{  .waitSemaphoreCount     =   1,
                                     .pWaitSemaphores        =   waitSemaphores,
                                     .pWaitDstStageMask      =   waitStages, 
@@ -241,13 +259,61 @@ private:
         createSwapChain();
         createImageViews();
         createRenderPass();
+        createDescriptorSetLayout();
         createGraphicsPipeline();
         createFramebuffers();
         createCommandPool();
         createVertexBuffer();
         createIndexBuffer();
+        createUniformBuffers();
         createCommandBuffer();
         createSyncObjects();
+    }
+
+    void updateUniformBuffer(uint32_t currentImage) {
+        static auto startTime = std::chrono::high_resolution_clock::now();
+
+        auto currentTime = std::chrono::high_resolution_clock::now();
+        float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+        UniformBufferObject ubo{.model  = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f)),
+                                .view   = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f)),
+                                .proj   = glm::perspective(glm::radians(45.0f),
+                                    swapChainExtent.width / (float)swapChainExtent.height, 0.1f, 10.0f)
+        };
+        memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
+    }
+
+    void createUniformBuffers() {
+        vk::DeviceSize bufferSize = sizeof(UniformBufferObject);
+
+        uniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+        uniformBuffersMemory.resize(MAX_FRAMES_IN_FLIGHT);
+        uniformBuffersMapped.resize(MAX_FRAMES_IN_FLIGHT);
+
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            createBuffer(bufferSize,
+                vk::BufferUsageFlagBits::eUniformBuffer,
+                vk::MemoryPropertyFlagBits::eHostVisible| vk::MemoryPropertyFlagBits::eHostCoherent,
+                uniformBuffers[i],
+                uniformBuffersMemory[i]);
+
+            vkMapMemory(device, uniformBuffersMemory[i], 0, bufferSize, 0, &uniformBuffersMapped[i]);
+            uniformBuffersMapped[i] = device.mapMemory(uniformBuffersMemory[i], 0, bufferSize);
+        }
+    }
+
+    void createDescriptorSetLayout() {
+        vk::DescriptorSetLayoutBinding uboLayoutBinding{.binding        = 0,
+                                                        .descriptorType = vk::DescriptorType::eUniformBuffer,
+                                                        .descriptorCount= 1,
+                                                        .stageFlags = vk::ShaderStageFlagBits::eVertex,
+                                                        .pImmutableSamplers = nullptr };
+
+        vk::DescriptorSetLayoutCreateInfo layoutInfo{   .bindingCount   = 1,
+                                                        .pBindings      = &uboLayoutBinding };
+
+        descriptorSetLayout = device.createDescriptorSetLayout(layoutInfo);
+
     }
 
     void createIndexBuffer(){
@@ -405,6 +471,14 @@ private:
         device.destroyPipeline(graphicsPipeline);
         device.destroyPipelineLayout(pipelineLayout);
         device.destroyRenderPass(renderPass);
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            vkDestroyBuffer(device, uniformBuffers[i], nullptr);
+            device.destroyBuffer(uniformBuffers[i]);
+            device.freeMemory(uniformBuffersMemory[i]);
+        }
+
+        vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+        device.destroyDescriptorSetLayout(descriptorSetLayout);
         device.destroy();
         if (enableValidationLayers) {
             DestroyDebugUtilsMessengerEXT(instance, debugMessenger, nullptr);
@@ -567,9 +641,9 @@ private:
         vk::PipelineInputAssemblyStateCreateInfo inputAssembly{ .topology               =   vk::PrimitiveTopology::eTriangleList,
                                                                 .primitiveRestartEnable =   VK_FALSE };
         vk::Viewport viewport{  .x          =   0.0f,
-                                .y          =   0.0f,
+                                .y          =   swapChainExtent.height,
                                 .width      =   (float)swapChainExtent.width,
-                                .height     =   (float)swapChainExtent.height,
+                                .height     =   -(float)swapChainExtent.height,
                                 .minDepth   =   0.0f,
                                 .maxDepth   =   1.0f };
         vk::Rect2D scissor{ .offset =   {0,0},
@@ -618,8 +692,8 @@ private:
             };
         colorBlending.setBlendConstants({ 0.f,0.f,0.f,0.f });
 
-        vk::PipelineLayoutCreateInfo pipelineLayoutInfo{.setLayoutCount         =   0, // Optional
-                                                        .pSetLayouts            =   nullptr, // Optional
+        vk::PipelineLayoutCreateInfo pipelineLayoutInfo{.setLayoutCount         =   1, // Optional
+                                                        .pSetLayouts            =   &descriptorSetLayout, // Optional
                                                         .pushConstantRangeCount =   0, // Optional
                                                         .pPushConstantRanges    =   nullptr }; // Optional
 
