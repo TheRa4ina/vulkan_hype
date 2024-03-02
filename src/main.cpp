@@ -114,9 +114,9 @@ const std::vector<uint16_t> indices = {
 };
 
 struct UniformBufferObject {
-    glm::mat4 model;
-    glm::mat4 view;
-    glm::mat4 proj;
+    alignas(16) glm::mat4 model;
+    alignas(16) glm::mat4 view;
+    alignas(16) glm::mat4 proj;
 };
 
 const uint32_t WIDTH = 800;
@@ -163,8 +163,14 @@ private:
     vk::Format swapChainImageFormat;
     vk::Extent2D swapChainExtent;
 
-    vk::RenderPass renderPass;
+    std::vector<vk::Buffer> uniformBuffers;
+    std::vector<vk::DeviceMemory> uniformBuffersMemory;
+    std::vector<void*> uniformBuffersMapped;
     vk::DescriptorSetLayout descriptorSetLayout;
+    vk::DescriptorPool descriptorPool;
+    std::vector<vk::DescriptorSet> descriptorSets;
+
+    vk::RenderPass renderPass;
     vk::PipelineLayout pipelineLayout;
     vk::Pipeline graphicsPipeline;
 
@@ -182,10 +188,6 @@ private:
     vk::DeviceMemory vertexBufferMemory;
     vk::Buffer indexBuffer;
     vk::DeviceMemory indexBufferMemory;
-
-    std::vector<vk::Buffer> uniformBuffers;
-    std::vector<vk::DeviceMemory> uniformBuffersMemory;
-    std::vector<void*> uniformBuffersMapped;
 
     void initWindow() {
         glfwInit();
@@ -267,7 +269,41 @@ private:
         createIndexBuffer();
         createUniformBuffers();
         createCommandBuffer();
+        createDescriptorPool();
+        createDescriptorSets();
         createSyncObjects();
+    }
+
+    void createDescriptorSets() {
+        std::vector<vk::DescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, descriptorSetLayout);
+        vk::DescriptorSetAllocateInfo allocInfo{  .descriptorPool = descriptorPool,
+                                                .descriptorSetCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT),
+                                                .pSetLayouts = layouts.data() };
+        descriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
+        descriptorSets = device.allocateDescriptorSets(allocInfo);
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+        {
+            vk::DescriptorBufferInfo bufferInfo{.buffer = uniformBuffers[i],
+                                                .offset = 0,
+                                                .range  = sizeof(UniformBufferObject) };
+            vk::WriteDescriptorSet descriptorWrite{ .dstSet             = descriptorSets[i],
+                                                    .dstBinding         = 0,
+                                                    .dstArrayElement    = 0,
+                                                    .descriptorCount    = 1,
+                                                    .descriptorType     = vk::DescriptorType::eUniformBuffer,
+                                                    .pImageInfo         = nullptr, // Optional
+                                                    .pBufferInfo        = &bufferInfo,
+                                                    .pTexelBufferView   = nullptr }; // Optional
+            device.updateDescriptorSets(descriptorWrite,0);
+        }
+    }
+
+    void createDescriptorPool() {
+        vk::DescriptorPoolSize poolSize{.descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT) };
+        vk::DescriptorPoolCreateInfo poolInfo{  .maxSets        = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT),
+                                                .poolSizeCount  = 1,
+                                                .pPoolSizes     = &poolSize};
+        descriptorPool = device.createDescriptorPool(poolInfo);
     }
 
     void updateUniformBuffer(uint32_t currentImage) {
@@ -297,8 +333,8 @@ private:
                 uniformBuffers[i],
                 uniformBuffersMemory[i]);
 
-            vkMapMemory(device, uniformBuffersMemory[i], 0, bufferSize, 0, &uniformBuffersMapped[i]);
             uniformBuffersMapped[i] = device.mapMemory(uniformBuffersMemory[i], 0, bufferSize);
+
         }
     }
 
@@ -472,12 +508,11 @@ private:
         device.destroyPipelineLayout(pipelineLayout);
         device.destroyRenderPass(renderPass);
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            vkDestroyBuffer(device, uniformBuffers[i], nullptr);
             device.destroyBuffer(uniformBuffers[i]);
             device.freeMemory(uniformBuffersMemory[i]);
         }
 
-        vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+        device.destroyDescriptorPool(descriptorPool);
         device.destroyDescriptorSetLayout(descriptorSetLayout);
         device.destroy();
         if (enableValidationLayers) {
@@ -530,9 +565,9 @@ private:
         commandBuffer.bindIndexBuffer(indexBuffer,0,vk::IndexType::eUint16);
 
         vk::Viewport viewport{  .x          =   0.0f,
-                                .y          =   0.0f,
+                                .y          =   static_cast<float>(swapChainExtent.height),
                                 .width      =   static_cast<float>(swapChainExtent.width),
-                                .height     =   static_cast<float>(swapChainExtent.height),
+                                .height     =   -static_cast<float>(swapChainExtent.height),
                                 .minDepth   =   0.0f,
                                 .maxDepth   =   1.0f };
         commandBuffer.setViewport(0,viewport);
@@ -540,7 +575,7 @@ private:
         vk::Rect2D scissor{ .offset =   { 0, 0 },
                             .extent =   swapChainExtent };
         commandBuffer.setScissor(0, scissor);
-        
+        commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout,0,descriptorSets[currentFrame], nullptr);
         commandBuffer.drawIndexed(static_cast<uint32_t>(indices.size()),1,0,0,0);
         commandBuffer.endRenderPass();
         commandBuffer.end();
@@ -641,7 +676,7 @@ private:
         vk::PipelineInputAssemblyStateCreateInfo inputAssembly{ .topology               =   vk::PrimitiveTopology::eTriangleList,
                                                                 .primitiveRestartEnable =   VK_FALSE };
         vk::Viewport viewport{  .x          =   0.0f,
-                                .y          =   swapChainExtent.height,
+                                .y          =   (float)swapChainExtent.height,
                                 .width      =   (float)swapChainExtent.width,
                                 .height     =   -(float)swapChainExtent.height,
                                 .minDepth   =   0.0f,
