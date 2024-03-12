@@ -276,7 +276,7 @@ private:
 
     void createDescriptorSets() {
         std::vector<vk::DescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, descriptorSetLayout);
-        vk::DescriptorSetAllocateInfo allocInfo{  .descriptorPool = descriptorPool,
+        vk::DescriptorSetAllocateInfo allocInfo{ .descriptorPool = descriptorPool,
                                                 .descriptorSetCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT),
                                                 .pSetLayouts = layouts.data() };
         descriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
@@ -299,7 +299,8 @@ private:
     }
 
     void createDescriptorPool() {
-        vk::DescriptorPoolSize poolSize{.descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT) };
+        vk::DescriptorPoolSize poolSize{.type = vk::DescriptorType::eUniformBuffer,
+                                        .descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT) };
         vk::DescriptorPoolCreateInfo poolInfo{  .maxSets        = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT),
                                                 .poolSizeCount  = 1,
                                                 .pPoolSizes     = &poolSize};
@@ -339,10 +340,10 @@ private:
     }
 
     void createDescriptorSetLayout() {
-        vk::DescriptorSetLayoutBinding uboLayoutBinding{.binding        = 0,
-                                                        .descriptorType = vk::DescriptorType::eUniformBuffer,
-                                                        .descriptorCount= 1,
-                                                        .stageFlags = vk::ShaderStageFlagBits::eVertex,
+        vk::DescriptorSetLayoutBinding uboLayoutBinding{.binding            = 0,
+                                                        .descriptorType     = vk::DescriptorType::eUniformBuffer,
+                                                        .descriptorCount    = 1,
+                                                        .stageFlags         = vk::ShaderStageFlagBits::eVertex,
                                                         .pImmutableSamplers = nullptr };
 
         vk::DescriptorSetLayoutCreateInfo layoutInfo{   .bindingCount   = 1,
@@ -381,7 +382,6 @@ private:
 
     void createVertexBuffer() {
         vk::DeviceSize bufferSize= sizeof(vertices[0]) * vertices.size();
-
         vk::Buffer stagingBuffer;
         vk::DeviceMemory stagingBufferMemory;
 
