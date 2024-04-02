@@ -530,6 +530,24 @@ private:
         descriptorPool = device.createDescriptorPool(poolInfo);
     }
 
+    void createDescriptorSetLayout() {
+        vk::DescriptorSetLayoutBinding uboLayoutBinding{.binding            = 0,
+                                                        .descriptorType     = vk::DescriptorType::eUniformBuffer,
+                                                        .descriptorCount    = 1,
+                                                        .stageFlags         = vk::ShaderStageFlagBits::eVertex,
+                                                        .pImmutableSamplers = nullptr };
+
+        vk::DescriptorSetLayoutBinding samplerLayoutBinding{.binding            = 1,
+                                                            .descriptorType     = vk::DescriptorType::eCombinedImageSampler,
+                                                            .descriptorCount    = 1,
+                                                            .stageFlags         = vk::ShaderStageFlagBits::eFragment,
+                                                            .pImmutableSamplers = nullptr};
+        std::array<vk::DescriptorSetLayoutBinding,2> bindings = {uboLayoutBinding, samplerLayoutBinding};
+        vk::DescriptorSetLayoutCreateInfo layoutInfo{.bindingCount = static_cast<uint32_t>(bindings.size()),
+                                                     .pBindings    = bindings.data()};
+        descriptorSetLayout = device.createDescriptorSetLayout(layoutInfo);
+    }
+
     void updateUniformBuffer(uint32_t currentImage) {
         static auto startTime = std::chrono::high_resolution_clock::now();
 
@@ -561,24 +579,6 @@ private:
             uniformBuffersMapped[i] = device.mapMemory(uniformBuffersMemory[i], 0, bufferSize);
             
         }
-    }
-
-    void createDescriptorSetLayout() {
-        vk::DescriptorSetLayoutBinding uboLayoutBinding{.binding            = 0,
-                                                        .descriptorType     = vk::DescriptorType::eUniformBuffer,
-                                                        .descriptorCount    = 1,
-                                                        .stageFlags         = vk::ShaderStageFlagBits::eVertex,
-                                                        .pImmutableSamplers = nullptr };
-
-        vk::DescriptorSetLayoutBinding samplerLayoutBinding{.binding            = 1,
-                                                            .descriptorType     = vk::DescriptorType::eCombinedImageSampler,
-                                                            .descriptorCount    = 1,
-                                                            .stageFlags         = vk::ShaderStageFlagBits::eFragment,
-                                                            .pImmutableSamplers = nullptr};
-        std::array<vk::DescriptorSetLayoutBinding,2> bindings = {uboLayoutBinding, samplerLayoutBinding};
-        vk::DescriptorSetLayoutCreateInfo layoutInfo{.bindingCount = static_cast<uint32_t>(bindings.size()),
-                                                     .pBindings    = bindings.data()};
-        descriptorSetLayout = device.createDescriptorSetLayout(layoutInfo);
     }
 
     void createIndexBuffer(){
