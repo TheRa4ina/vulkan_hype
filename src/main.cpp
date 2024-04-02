@@ -80,6 +80,7 @@ void DestroyDebugUtilsMessengerEXT(
 struct Vertex {
     glm::vec2 pos;
     glm::vec3 color;
+    glm::vec2 texCoord;
 
     static vk::VertexInputBindingDescription getBindingDescription() {
         vk::VertexInputBindingDescription bindingDescription{   .binding    = 0,
@@ -89,8 +90,9 @@ struct Vertex {
         return bindingDescription;
     }
 
-    static std::array<vk::VertexInputAttributeDescription, 2> getAttributeDescriptions() {
-        std::array<vk::VertexInputAttributeDescription, 2> attributeDescriptions{};
+
+    static std::array<vk::VertexInputAttributeDescription, 3> getAttributeDescriptions() {
+        std::array<vk::VertexInputAttributeDescription, 3> attributeDescriptions{};
         attributeDescriptions[0].binding = 0;
         attributeDescriptions[0].location = 0;
         attributeDescriptions[0].format = vk::Format::eR32G32Sfloat;
@@ -101,15 +103,20 @@ struct Vertex {
         attributeDescriptions[1].format = vk::Format::eR32G32B32Sfloat;
         attributeDescriptions[1].offset = offsetof(Vertex, color);
 
+        attributeDescriptions[2].binding = 0;
+        attributeDescriptions[2].location = 2;
+        attributeDescriptions[2].format = vk::Format::eR32G32Sfloat;
+        attributeDescriptions[2].offset = offsetof(Vertex, texCoord);
+
         return attributeDescriptions;
     }
 };
 
 const std::vector<Vertex> vertices = {
-    {{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
-    {{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
-    {{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
-    {{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}}
+    {{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
+    {{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
+    {{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
+    {{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}}
 };
 const std::vector<uint16_t> indices = {
     0, 1, 2, 2, 3, 0
@@ -473,7 +480,7 @@ private:
 
     void createDescriptorSets() {
         std::vector<vk::DescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, descriptorSetLayout);
-        vk::DescriptorSetAllocateInfo allocInfo{ .descriptorPool = descriptorPool,
+        vk::DescriptorSetAllocateInfo allocInfo{.descriptorPool = descriptorPool,
                                                 .descriptorSetCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT),
                                                 .pSetLayouts = layouts.data() };
         descriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
@@ -483,24 +490,43 @@ private:
             vk::DescriptorBufferInfo bufferInfo{.buffer = uniformBuffers[i],
                                                 .offset = 0,    
                                                 .range  = sizeof(UniformBufferObject) };
-            vk::WriteDescriptorSet descriptorWrite{ .dstSet             = descriptorSets[i],
-                                                    .dstBinding         = 0,
-                                                    .dstArrayElement    = 0,
-                                                    .descriptorCount    = 1,
-                                                    .descriptorType     = vk::DescriptorType::eUniformBuffer,
-                                                    .pImageInfo         = nullptr, // Optional
-                                                    .pBufferInfo        = &bufferInfo,
-                                                    .pTexelBufferView   = nullptr }; // Optional
-            device.updateDescriptorSets(descriptorWrite,0);
+
+            vk::DescriptorImageInfo imageInfo{  .sampler     = textureSampler,
+                                                .imageView   = textureImageView,
+                                                .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+                                                };
+            std::array<vk::WriteDescriptorSet,2> descriptorWrites{
+                vk::WriteDescriptorSet{ .dstSet             = descriptorSets[i],
+                                        .dstBinding         = 0,
+                                        .dstArrayElement    = 0,
+                                        .descriptorCount    = 1,
+                                        .descriptorType     = vk::DescriptorType::eUniformBuffer,
+                                        .pImageInfo         = nullptr, // Optional
+                                        .pBufferInfo        = &bufferInfo,
+                                        .pTexelBufferView   = nullptr }, // Optional
+                vk::WriteDescriptorSet{ .dstSet             = descriptorSets[i],
+                                        .dstBinding         = 1,
+                                        .dstArrayElement    = 0,
+                                        .descriptorCount    = 1,
+                                        .descriptorType     = vk::DescriptorType::eCombinedImageSampler,
+                                        .pImageInfo         = &imageInfo,
+                                        .pBufferInfo        = nullptr, // Optional
+                                        .pTexelBufferView   = nullptr }, // Optional
+            };                
+            device.updateDescriptorSets(descriptorWrites,0);
         }
     }
 
     void createDescriptorPool() {
-        vk::DescriptorPoolSize poolSize{.type = vk::DescriptorType::eUniformBuffer,
-                                        .descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT) };
+        std::array<vk::DescriptorPoolSize, 2> poolSizes{};
+        poolSizes[0].type = vk::DescriptorType::eUniformBuffer;
+        poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+        poolSizes[1].type = vk::DescriptorType::eCombinedImageSampler;
+        poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+
         vk::DescriptorPoolCreateInfo poolInfo{  .maxSets        = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT),
-                                                .poolSizeCount  = 1,
-                                                .pPoolSizes     = &poolSize};
+                                                .poolSizeCount  = static_cast<uint32_t>(poolSizes.size()),
+                                                .pPoolSizes     = poolSizes.data()};
         descriptorPool = device.createDescriptorPool(poolInfo);
     }
 
@@ -544,11 +570,15 @@ private:
                                                         .stageFlags         = vk::ShaderStageFlagBits::eVertex,
                                                         .pImmutableSamplers = nullptr };
 
-        vk::DescriptorSetLayoutCreateInfo layoutInfo{   .bindingCount   = 1,
-                                                        .pBindings      = &uboLayoutBinding };
-
+        vk::DescriptorSetLayoutBinding samplerLayoutBinding{.binding            = 1,
+                                                            .descriptorType     = vk::DescriptorType::eCombinedImageSampler,
+                                                            .descriptorCount    = 1,
+                                                            .stageFlags         = vk::ShaderStageFlagBits::eFragment,
+                                                            .pImmutableSamplers = nullptr};
+        std::array<vk::DescriptorSetLayoutBinding,2> bindings = {uboLayoutBinding, samplerLayoutBinding};
+        vk::DescriptorSetLayoutCreateInfo layoutInfo{.bindingCount = static_cast<uint32_t>(bindings.size()),
+                                                     .pBindings    = bindings.data()};
         descriptorSetLayout = device.createDescriptorSetLayout(layoutInfo);
-
     }
 
     void createIndexBuffer(){
@@ -1043,7 +1073,7 @@ private:
     vk::SurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& availableFormats) {
 
         for (const auto& availableFormat : availableFormats) {
-            if (availableFormat.format == vk::Format::eB8G8R8A8Unorm && availableFormat.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear) {
+            if (availableFormat.format == vk::Format::eB8G8R8A8Srgb && availableFormat.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear) {
                 return availableFormat;
             }
         }
