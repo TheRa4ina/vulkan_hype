@@ -16,3 +16,8 @@ PRIVATE
 	glfw
 	glm::glm
 )	
+
+#move textures 
+add_custom_command(TARGET AnchorApp POST_BUILD
+                   COMMAND ${CMAKE_COMMAND} -E copy_directory
+                       ${CMAKE_SOURCE_DIR}/textures ${CMAKE_BINARY_DIR}/textures)

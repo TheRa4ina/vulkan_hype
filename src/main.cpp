@@ -18,6 +18,8 @@
 #include <fstream>
 #include <filesystem>
 #include <array>
+#define STB_IMAGE_IMPLEMENTATION
+#include <src/stb_image.h>
 
 static std::vector<char> readFile(const std::string& filename) {
     std::ifstream file(filename, std::ios::ate | std::ios::binary);
@@ -117,6 +119,7 @@ struct UniformBufferObject {
     alignas(16) glm::mat4 model;
     alignas(16) glm::mat4 view;
     alignas(16) glm::mat4 proj;
+    alignas(4) float time;
 };
 
 const uint32_t WIDTH = 800;
@@ -188,6 +191,11 @@ private:
     vk::DeviceMemory vertexBufferMemory;
     vk::Buffer indexBuffer;
     vk::DeviceMemory indexBufferMemory;
+
+    vk::Image textureImage;
+    vk::DeviceMemory textureImageMemory;
+    vk::ImageView textureImageView;
+    vk::Sampler textureSampler;
 
     void initWindow() {
         glfwInit();
@@ -265,6 +273,9 @@ private:
         createGraphicsPipeline();
         createFramebuffers();
         createCommandPool();
+        createTextureBuffer();
+        createTextureImageView();
+        createTextureSampler();
         createVertexBuffer();
         createIndexBuffer();
         createUniformBuffers();
@@ -272,6 +283,192 @@ private:
         createDescriptorPool();
         createDescriptorSets();
         createSyncObjects();
+    }
+
+    void createTextureSampler() {
+        vk::PhysicalDeviceProperties properties = physicalDevice.getProperties();
+
+        vk::SamplerCreateInfo samplerInfo{  .magFilter              = vk::Filter::eLinear,
+                                            .minFilter              = vk::Filter::eLinear,
+                                            .mipmapMode             = vk::SamplerMipmapMode::eLinear,
+                                            .addressModeU           = vk::SamplerAddressMode::eRepeat,
+                                            .addressModeV           = vk::SamplerAddressMode::eRepeat,
+                                            .addressModeW           = vk::SamplerAddressMode::eRepeat,
+                                            .mipLodBias             = 0.0f,
+                                            .anisotropyEnable       = vk::True,
+                                            .maxAnisotropy          = properties.limits.maxSamplerAnisotropy,
+                                            .compareEnable          = vk::False,
+                                            .compareOp              = vk::CompareOp::eAlways,
+                                            .minLod                 = 0.0f,
+                                            .maxLod                 = 0.0f,
+                                            .borderColor            = vk::BorderColor::eIntOpaqueBlack,
+                                            .unnormalizedCoordinates= vk::False};
+        textureSampler = device.createSampler(samplerInfo);
+    }
+
+    void createTextureImageView() {
+        textureImageView = createImageView(textureImage, vk::Format::eR8G8B8A8Srgb);
+        
+    }
+
+    vk::ImageView createImageView(vk::Image image, vk::Format format) {
+        vk::ImageSubresourceRange subresourceRange{ .aspectMask = vk::ImageAspectFlagBits::eColor,
+                                                    .baseMipLevel = 0,
+                                                    .levelCount = 1,
+                                                    .baseArrayLayer = 0,
+                                                    .layerCount = 1 };
+        vk::ImageViewCreateInfo viewInfo{   .image = image,
+                                            .viewType = vk::ImageViewType::e2D,
+                                            .format = format,
+                                            .subresourceRange=subresourceRange};
+        vk::ImageView imageView = device.createImageView(viewInfo);
+        return imageView;
+    }
+
+    void createTextureBuffer() {
+        int texWidth, texHeight, texChannels;
+        stbi_uc* pixels = stbi_load("../textures/texture.jpg", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+        vk::DeviceSize imageSize = texWidth * texHeight * 4;
+
+        if (!pixels) {
+            throw std::runtime_error("failed to load texture image!");
+        }
+
+        vk::Buffer stagingBuffer;
+        vk::DeviceMemory stagingBufferMemory;   
+        createBuffer(imageSize, vk::BufferUsageFlagBits::eTransferSrc,
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+            stagingBuffer, stagingBufferMemory);
+
+        void* data = device.mapMemory(stagingBufferMemory, 0, imageSize);
+        memcpy(data, pixels, static_cast<size_t>(imageSize));
+        device.unmapMemory(stagingBufferMemory);
+        stbi_image_free(pixels);
+
+        createImage(texWidth, texHeight, vk::Format::eR8G8B8A8Srgb, vk::ImageTiling::eOptimal,
+            vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
+            vk::MemoryPropertyFlagBits::eDeviceLocal, textureImage, textureImageMemory);
+
+        transitionImageLayout(textureImage,vk::Format::eR8G8B8A8Srgb,vk::ImageLayout::eUndefined,
+            vk::ImageLayout::eTransferDstOptimal);
+        copyBufferToImage(stagingBuffer, textureImage,
+            static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
+        transitionImageLayout(textureImage, vk::Format::eR8G8B8A8Srgb, vk::ImageLayout::eTransferDstOptimal,
+            vk::ImageLayout::eShaderReadOnlyOptimal);
+
+        device.destroyBuffer(stagingBuffer);
+        device.freeMemory(stagingBufferMemory);
+
+    }
+    void copyBufferToImage(vk::Buffer buffer, vk::Image image, uint32_t width, uint32_t height) {
+        vk::CommandBuffer commandBuffer = beginSingleTimeCommands();
+
+        vk::ImageSubresourceLayers subresource{ .aspectMask     = vk::ImageAspectFlagBits::eColor ,
+                                                .mipLevel       = 0,
+                                                .baseArrayLayer = 0,
+                                                .layerCount     = 1 };
+        vk::BufferImageCopy region{ .bufferOffset       = 0,
+                                    .bufferRowLength    = 0,
+                                    .bufferImageHeight  = 0,
+                                    .imageSubresource   = subresource,
+                                    .imageOffset        = { 0, 0, 0 },
+                                    .imageExtent        = { width,height,1} };
+        commandBuffer.copyBufferToImage(buffer, image, vk::ImageLayout::eTransferDstOptimal, 1, &region);
+
+        endSingleTimeCommands(commandBuffer);
+    }
+
+    void transitionImageLayout(vk::Image image, vk::Format format,
+    vk::ImageLayout oldLayout, vk::ImageLayout newLayout) {
+
+        vk::CommandBuffer commandBuffer = beginSingleTimeCommands();
+        vk::ImageSubresourceRange subresourceRange{ .aspectMask     = vk::ImageAspectFlagBits::eColor,
+                                                    .baseMipLevel   = 0,
+                                                    .levelCount     = 1,
+                                                    .baseArrayLayer = 0,
+                                                    .layerCount     = 1, };
+        vk::ImageMemoryBarrier barrier{ .srcAccessMask = {}, // TODO
+                                        .dstAccessMask = {}, // TODO
+                                        .oldLayout          = oldLayout,
+                                        .newLayout          = newLayout,
+                                        .srcQueueFamilyIndex= vk::QueueFamilyIgnored,
+                                        .dstQueueFamilyIndex= vk::QueueFamilyIgnored,
+                                        .image              = image,
+                                        .subresourceRange   = subresourceRange};
+        vk::PipelineStageFlags sourceStage;
+        vk::PipelineStageFlags destinationStage;
+        if (oldLayout == vk::ImageLayout::eUndefined && newLayout == vk::ImageLayout::eTransferDstOptimal) {
+            barrier.srcAccessMask = {};
+            barrier.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
+
+            sourceStage = vk::PipelineStageFlagBits::eTopOfPipe;
+            destinationStage = vk::PipelineStageFlagBits::eTransfer;
+        }
+        else if (oldLayout == vk::ImageLayout::eTransferDstOptimal && newLayout == vk::ImageLayout::eShaderReadOnlyOptimal) {
+            barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
+            barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
+
+            sourceStage =vk::PipelineStageFlagBits::eTransfer;
+            destinationStage = vk::PipelineStageFlagBits::eFragmentShader;
+        }
+        else {
+            throw std::invalid_argument("unsupported layout transition!");
+        }
+        commandBuffer.pipelineBarrier(sourceStage, destinationStage, {}, 0, nullptr, 0, nullptr, 1, &barrier);
+        endSingleTimeCommands(commandBuffer);
+
+    }
+
+    vk::CommandBuffer beginSingleTimeCommands() {
+        vk::CommandBufferAllocateInfo allocInfo{.commandPool        = commandPool,
+                                                .level              = vk::CommandBufferLevel::ePrimary,
+                                                .commandBufferCount = 1 };
+
+        vk::CommandBuffer commandBuffer = device.allocateCommandBuffers(allocInfo)[0];
+
+        vk::CommandBufferBeginInfo beginInfo{ .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit};
+        commandBuffer.begin(beginInfo);
+
+        return commandBuffer;
+    }
+
+    void endSingleTimeCommands(vk::CommandBuffer commandBuffer) {
+        commandBuffer.end();
+
+        vk::SubmitInfo submitInfo{  .commandBufferCount = 1,
+                                    .pCommandBuffers = &commandBuffer };
+        graphicsQueue.submit(submitInfo);
+        graphicsQueue.waitIdle();
+        device.freeCommandBuffers(commandPool,commandBuffer);
+    }
+
+
+    void createImage(uint32_t width, uint32_t height, vk::Format format, vk::ImageTiling tiling,
+        vk::ImageUsageFlags usage, vk::MemoryPropertyFlags properties, vk::Image& image,
+        vk::DeviceMemory& imageMemory) {
+        vk::ImageCreateInfo imageInfo{  .imageType      = vk::ImageType::e2D,
+                                        .format         = format,
+                                        .mipLevels      = 1,
+                                        .arrayLayers    = 1,
+                                        .samples        = vk::SampleCountFlagBits::e1,
+                                        .tiling         = tiling,
+                                        .usage          = usage,
+                                        .sharingMode    = vk::SharingMode::eExclusive,
+                                        .initialLayout  = vk::ImageLayout::eUndefined };
+        imageInfo.extent.width = static_cast<uint32_t>(width);
+        imageInfo.extent.height = static_cast<uint32_t>(height);
+        imageInfo.extent.depth = 1;
+
+
+        image = device.createImage(imageInfo);
+
+        vk::MemoryRequirements memRequirements = device.getImageMemoryRequirements(image);
+        vk::MemoryAllocateInfo allocInfo{ .allocationSize = memRequirements.size,
+                                            .memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits,
+                                            properties) };
+        imageMemory = device.allocateMemory(allocInfo);
+
+        device.bindImageMemory(image, imageMemory,0);
     }
 
     void createDescriptorSets() {
@@ -284,7 +481,7 @@ private:
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
         {
             vk::DescriptorBufferInfo bufferInfo{.buffer = uniformBuffers[i],
-                                                .offset = 0,
+                                                .offset = 0,    
                                                 .range  = sizeof(UniformBufferObject) };
             vk::WriteDescriptorSet descriptorWrite{ .dstSet             = descriptorSets[i],
                                                     .dstBinding         = 0,
@@ -312,10 +509,11 @@ private:
 
         auto currentTime = std::chrono::high_resolution_clock::now();
         float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
-        UniformBufferObject ubo{.model  = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f)),
-                                .view   = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f)),
-                                .proj   = glm::perspective(glm::radians(45.0f),
-                                    swapChainExtent.width / (float)swapChainExtent.height, 0.1f, 10.0f)
+        UniformBufferObject ubo{ .model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f)),
+                                .view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f)),
+                                .proj = glm::perspective(glm::radians(45.0f),
+                                    swapChainExtent.width / (float)swapChainExtent.height, 0.1f, 10.0f),
+                                .time = time
         };
         memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
     }
@@ -335,7 +533,7 @@ private:
                 uniformBuffersMemory[i]);
 
             uniformBuffersMapped[i] = device.mapMemory(uniformBuffersMemory[i], 0, bufferSize);
-
+            
         }
     }
 
@@ -431,25 +629,12 @@ private:
 
 
     void copyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size) {
-        vk::CommandBufferAllocateInfo allocInfo{.commandPool = commandPool,
-                                                .level =   vk::CommandBufferLevel::ePrimary,
-                                                .commandBufferCount = 1};
+        vk::CommandBuffer commandBuffer = beginSingleTimeCommands();
 
-        
-        vk::CommandBuffer commandBuffer = device.allocateCommandBuffers(allocInfo)[0];
-        vk::CommandBufferBeginInfo beginInfo{.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit};
-        commandBuffer.begin(beginInfo);
-        vk::BufferCopy copyRegion{  .srcOffset  =0,
-                                    .dstOffset  = 0,
-                                    .size       = size};    
-        commandBuffer.copyBuffer(srcBuffer,dstBuffer,copyRegion);
-        commandBuffer.end();
-        vk::SubmitInfo submitInfo{  .commandBufferCount = 1,
-                                    .pCommandBuffers    = &commandBuffer};
-        graphicsQueue.submit(submitInfo);
-
-        graphicsQueue.waitIdle();
-        device.freeCommandBuffers(commandPool,commandBuffer);
+        vk::BufferCopy copyRegion{.size = size };
+        commandBuffer.copyBuffer(srcBuffer, dstBuffer,copyRegion);
+            
+        endSingleTimeCommands(commandBuffer);
     }
 
     uint32_t findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) {
@@ -492,9 +677,12 @@ private:
 
     void cleanup() {
         cleanupSwapChain();
+        device.destroySampler(textureSampler);
+        device.destroyImageView(textureImageView);
+        device.destroyImage(textureImage);
+        device.freeMemory(textureImageMemory);
         device.destroyBuffer(vertexBuffer);
         device.freeMemory(vertexBufferMemory);
-
         device.destroyBuffer(indexBuffer);
         device.freeMemory(indexBufferMemory);
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
@@ -773,19 +961,7 @@ private:
     void createImageViews() {
         swapChainImageViews.resize(swapChainImages.size());
         for (size_t i = 0; i < swapChainImages.size(); i++) {
-            vk::ImageViewCreateInfo createInfo{ .image          =   swapChainImages[i],
-                                                .viewType       =   vk::ImageViewType::e2D,
-                                                .format         =   swapChainImageFormat};
-            createInfo.components.r = vk::ComponentSwizzle::eIdentity;
-            createInfo.components.g = vk::ComponentSwizzle::eIdentity;
-            createInfo.components.b = vk::ComponentSwizzle::eIdentity;
-            createInfo.components.a = vk::ComponentSwizzle::eIdentity;
-            createInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-            createInfo.subresourceRange.baseMipLevel = 0;
-            createInfo.subresourceRange.levelCount = 1;
-            createInfo.subresourceRange.baseArrayLayer = 0;
-            createInfo.subresourceRange.layerCount = 1;
-            swapChainImageViews[i] = device.createImageView(createInfo);
+            swapChainImageViews[i] =createImageView(swapChainImages[i],swapChainImageFormat);
         }
     }
 
@@ -923,7 +1099,7 @@ private:
 
 
 
-        vk::PhysicalDeviceFeatures deviceFeatures{};
+        vk::PhysicalDeviceFeatures deviceFeatures{.samplerAnisotropy = VK_TRUE };
         vk::DeviceCreateInfo createInfo{    .queueCreateInfoCount   =   static_cast<uint32_t>(queueCreateInfos.size()),
                                             .pQueueCreateInfos      =   queueCreateInfos.data(),
                                             .enabledExtensionCount  =   static_cast<uint32_t>(deviceExtensions.size()),
@@ -974,7 +1150,9 @@ private:
             swapChainAdequate = !swapChainSupport.formats.empty() && !swapChainSupport.presentModes.empty();
         }
 
-        return indices.isComplete() && extensionsSupported &&swapChainAdequate;
+        vk::PhysicalDeviceFeatures supportedFeatures = device.getFeatures();
+
+        return indices.isComplete() && extensionsSupported &&swapChainAdequate && supportedFeatures.samplerAnisotropy;
         
     }
 
