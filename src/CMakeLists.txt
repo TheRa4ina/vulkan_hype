@@ -10,7 +10,6 @@ PRIVATE
 )
 target_link_libraries(AnchorApp 
 PRIVATE 
-	Hello
 	Vulkan::Vulkan
 	Vulkan::Headers
 	glfw
@@ -21,3 +20,7 @@ PRIVATE
 add_custom_command(TARGET AnchorApp POST_BUILD
                    COMMAND ${CMAKE_COMMAND} -E copy_directory
                        ${CMAKE_SOURCE_DIR}/textures ${CMAKE_BINARY_DIR}/textures)
+#move .obj files
+					   add_custom_command(TARGET AnchorApp POST_BUILD
+                   COMMAND ${CMAKE_COMMAND} -E copy_directory
+                       ${CMAKE_SOURCE_DIR}/models ${CMAKE_BINARY_DIR}/models)
